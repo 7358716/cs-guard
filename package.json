@@ -1,6 +1,6 @@
 {
   "name": "cs-guard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "cs-guard — 看护/守护：网络 / 环境 / 配置 / 崩溃 / 对话中断 五类故障的检测与恢复",
   "main": "src/index.js",
@@ -20,11 +20,17 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    },
     "compat": {
       "tested": [
         ">=0.2.1-rc.2"
       ],
-      "note": "宿主 <0.2.1 时客户端界面自动不加载"
+      "note": "宿主 rc1 也能加载（宿主机兼容层 + 客户端防御式注册）"
     }
   },
   "license": "MIT",
