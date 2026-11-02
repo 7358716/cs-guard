@@ -1,0 +1,8 @@
+# cs-guard bundle patch —— 只 insert 自己的一行。
+#
+# ⚠️ 纪律：绝不 insert agent-default-model 等官方行（insert 不去重，
+# 两个包 insert 同一 id 会让加载失败）。cs-myfree 负责那一条。
+
+- insert:
+    - id: cs-guard
+      name: 'cs-guard'

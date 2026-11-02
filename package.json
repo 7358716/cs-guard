@@ -1,0 +1,29 @@
+{
+  "name": "cs-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "cs-guard — 看护/守护：网络 / 环境 / 配置 / 崩溃 / 对话中断 五类故障的检测与恢复",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "presets.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "license": "MIT"
+}
