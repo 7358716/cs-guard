@@ -1,28 +1,107 @@
 /**
- * cs-guard — 看护/守护（骨架 v0.1.0）
+ * cs-guard — 看护/守护插件入口
  *
  * 设计依据：design/08-架构设计方案-v3终版.md §12
  *
- * ⚠️ 职责边界（v3 §12.2）：
- *  · 只做**检测 + 上报 + 受限恢复**，不碰 agent/request-error 与 llm/stream 的恢复权
- *  · 重启复用现有 dsh-restart-guard 通道，不另造 supervisor/cron
- *  · 只读消费 cs-myfree 的审计，**不 import 对方**（文件级约定）
+ * 职责：网络 / 环境 / 配置 / 崩溃 / 对话中断 五类故障的检测与恢复
+ *
+ * ⚠️ 三条纪律（v3 §12.2）：
+ *  1. 只做检测 + 上报 + **受限**恢复，不碰 agent/request-error 与 llm/stream
+ *  2. 重启复用现有 dsh-restart-guard 通道，不另造 supervisor/cron
+ *  3. 只读消费 cs-myfree 的审计，**不 import 对方**（文件级约定）
+ *
+ * 权限收窄（v3 §12.4）：删除/移动文件**永远人工确认**，本插件不做。
  *
  * @module cs-guard
  */
 
+import { classifyNetwork, PROBE_TARGETS } from './detect/network.js'
+import { detectDegenerate, assessContext, DEFAULT_TOKEN_WARN, DEFAULT_TOKEN_CRITICAL } from './detect/context.js'
+import { checkPatchRefs, checkJsTags, checkBundleConsistency } from './detect/config.js'
+import { assessDisk, assessMemory, assessOvercommit, THRESHOLDS } from './detect/env.js'
+
 const NAME = 'cs-guard'
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 
 export const name = NAME
 export const version = VERSION
 
-/** 插件入口。刻意不声明任何硬依赖 —— 缺服务只降级功能。 */
-export function apply(ctx) {
-  const log = (m) => ctx.logger?.info?.(m)
-  log(`[${NAME}] v${VERSION} 已加载（骨架版）`)
+/**
+ * 汇总一次巡检（纯函数，便于测试）。
+ * @param {object} input 各项检测的原始数据
+ */
+export function buildReport(input = {}) {
+  const findings = []
 
-  // 五类故障检测器（后续实现）：网络 / 环境 / 配置 / 崩溃 / 对话中断
-  // 当前为骨架：只建立 fiber，不做巡检。
-  ctx.effect(() => () => { log(`[${NAME}] 已释放`) }, `${NAME}: root`)
+  if (input.network) {
+    const n = classifyNetwork(input.network)
+    if (n.verdict !== 'healthy') {
+      findings.push({ type: 'network', level: n.verdict === 'all-down' ? 'critical' : 'warn', detail: n.impact.join('；') || '网络异常' })
+    }
+  }
+  if (input.context) {
+    const c = assessContext(input.context)
+    if (c.shouldCompact) findings.push({ type: 'context', level: c.level, detail: c.advice })
+    else if (c.degenerate) findings.push({ type: 'context', level: 'warn', detail: `检测到退化模板：${c.hit}` })
+  }
+  if (input.disk) {
+    const d = assessDisk(input.disk)
+    if (d.level === 'warn' || d.level === 'critical') findings.push({ type: 'disk', level: d.level, detail: d.advice })
+  }
+  if (input.memory) {
+    const m = assessMemory(input.memory)
+    if (m.level === 'warn' || m.level === 'critical') findings.push({ type: 'memory', level: m.level, detail: m.advice })
+  }
+  if (input.overcommit) {
+    const o = assessOvercommit(input.overcommit)
+    if (o.level === 'warn' || o.level === 'critical') findings.push({ type: 'overcommit', level: o.level, detail: o.advice })
+  }
+  if (input.patch) {
+    const p = checkPatchRefs(input.patch, input.resolveFn)
+    if (!p.ok) findings.push({ type: 'config', level: 'warn', detail: p.problems.join('；') })
+    const j = checkJsTags(input.patch)
+    if (!j.ok) findings.push({ type: 'config', level: 'warn', detail: `patch 含 !!js 标签（第 ${j.hits[0].line} 行）` })
+  }
+  if (input.profile) {
+    const b = checkBundleConsistency(input.profile.bundles, input.profile.deps)
+    if (!b.ok) findings.push({ type: 'config', level: 'warn', detail: b.problems.join('；') })
+  }
+
+  const worst = findings.reduce((acc, f) => (f.level === 'critical' ? 'critical' : acc === 'critical' ? 'critical' : f.level === 'warn' ? 'warn' : acc), 'ok')
+  return {
+    at: Date.now(),
+    level: findings.length === 0 ? 'ok' : worst,
+    findings,
+    summary: findings.length === 0 ? '全部正常' : `${findings.length} 项需注意（最高 ${worst}）`,
+  }
 }
+
+/** 插件入口。刻意不声明硬依赖 —— 缺服务只降级功能。 */
+export function apply(ctx, rawConfig = {}) {
+  const log = (m) => ctx.logger?.info?.(m)
+  const warn = (m) => ctx.logger?.warn?.(m)
+  log(`[${NAME}] v${VERSION} 已加载`)
+
+  ctx.effect(() => () => { log(`[${NAME}] 已释放`) }, `${NAME}: root`)
+
+  // 巡检能力挂到 ctx 上（供设置页/命令行调用；真正定时由外部调度，避免自造 cron）
+  if (ctx.provide) {
+    ctx.provide?.('cs-guard', {
+      buildReport,
+      detectDegenerate,
+      assessContext,
+      classifyNetwork,
+      assessDisk,
+      assessMemory,
+      assessOvercommit,
+      thresholds: THRESHOLDS,
+      contextThresholds: { warn: DEFAULT_TOKEN_WARN, critical: DEFAULT_TOKEN_CRITICAL },
+      probeTargets: PROBE_TARGETS,
+    })
+    log(`[${NAME}] 巡检接口已暴露`)
+  } else {
+    warn(`[${NAME}] 宿主无 provide，巡检接口仅内部可用`)
+  }
+}
+
+export { buildReport as report, classifyNetwork, detectDegenerate, assessContext, assessDisk, assessMemory, assessOvercommit, THRESHOLDS }
