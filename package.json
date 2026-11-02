@@ -1,7 +1,6 @@
 {
   "name": "cs-guard",
-  "version": "0.2.0",
-  "private": true,
+  "version": "1.0.0",
   "type": "module",
   "description": "cs-guard — 看护/守护：网络 / 环境 / 配置 / 崩溃 / 对话中断 五类故障的检测与恢复",
   "main": "src/index.js",
@@ -29,5 +28,13 @@
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
     "test:static": "bash test/ci-static.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/7358716/cs-guard.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }
