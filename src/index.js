@@ -21,6 +21,7 @@ import { checkPatchRefs, checkJsTags, checkBundleConsistency } from './detect/co
 import { assessDisk, assessMemory, assessOvercommit, THRESHOLDS } from './detect/env.js'
 import { decide as decideSupervise, buildRestartRequest, DECISION, DEFAULTS as SUPERVISE_DEFAULTS } from './supervisor/plan.js'
 import { decideResume, compactPrompt, ACTION as RESUME_ACTION } from './repair/resume.js'
+import { guardApply, makeLogger, safeEffect, safeProvide, detectHostVersion } from './compat.js'
 
 const NAME = 'cs-guard'
 const VERSION = '0.2.0'
@@ -78,39 +79,41 @@ export function buildReport(input = {}) {
   }
 }
 
-/** 插件入口。刻意不声明硬依赖 —— 缺服务只降级功能。 */
-export function apply(ctx, rawConfig = {}) {
-  const log = (m) => ctx.logger?.info?.(m)
-  const warn = (m) => ctx.logger?.warn?.(m)
-  log(`[${NAME}] v${VERSION} 已加载`)
+/**
+ * 插件入口（**经 guardApply 包装：任何异常都不会弄坏宿主启动**）
+ *
+ * 刻意不声明任何硬依赖 —— 缺服务只降级功能。
+ */
+export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
+  const log = makeLogger(ctx, NAME)
+  log.info(`v${VERSION} 启动（宿主 ${detectHostVersion(ctx) ?? '版本未知'}）`)
 
-  ctx.effect(() => () => { log(`[${NAME}] 已释放`) }, `${NAME}: root`)
+  // 释放钩子（宿主无 effect 就跳过）
+  const effectOk = safeEffect(ctx, () => () => { log.info('已释放') }, `${NAME}: root`)
+  if (!effectOk) log.debug('宿主无 effect：跳过释放钩子')
 
-  // 巡检能力挂到 ctx 上（供设置页/命令行调用；真正定时由外部调度，避免自造 cron）
-  if (ctx.provide) {
-    ctx.provide?.('cs-guard', {
-      buildReport,
-      detectDegenerate,
-      assessContext,
-      classifyNetwork,
-      assessDisk,
-      assessMemory,
-      assessOvercommit,
-      thresholds: THRESHOLDS,
-      contextThresholds: { warn: DEFAULT_TOKEN_WARN, critical: DEFAULT_TOKEN_CRITICAL },
-      probeTargets: PROBE_TARGETS,
-      // 进程外 supervisor 的决策（执行由 supervisor 脚本负责）
-      decideSupervise,
-      buildRestartRequest,
-      superviseDefaults: SUPERVISE_DEFAULTS,
-      // 对话中断续跑
-      decideResume,
-      compactPrompt,
-    })
-    log(`[${NAME}] 巡检接口已暴露`)
-  } else {
-    warn(`[${NAME}] 宿主无 provide，巡检接口仅内部可用`)
-  }
-}
+  // 暴露巡检接口（宿主无 provide 就跳过）
+  const provided = safeProvide(ctx, 'cs-guard', {
+    buildReport,
+    detectDegenerate,
+    assessContext,
+    classifyNetwork,
+    assessDisk,
+    assessMemory,
+    assessOvercommit,
+    thresholds: THRESHOLDS,
+    contextThresholds: { warn: DEFAULT_TOKEN_WARN, critical: DEFAULT_TOKEN_CRITICAL },
+    probeTargets: PROBE_TARGETS,
+    decideSupervise,
+    buildRestartRequest,
+    superviseDefaults: SUPERVISE_DEFAULTS,
+    decideResume,
+    compactPrompt,
+  })
+  if (provided) log.info('巡检接口已暴露')
+  else log.warn('宿主无 provide：巡检接口仅内部可用（功能不受影响）')
+
+  log.info('启动完成')
+}, NAME)
 
 export { buildReport as report, classifyNetwork, detectDegenerate, assessContext, assessDisk, assessMemory, assessOvercommit, THRESHOLDS, decideSupervise, buildRestartRequest, DECISION, decideResume, compactPrompt, RESUME_ACTION }
