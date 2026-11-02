@@ -1,6 +1,6 @@
 {
   "name": "cs-guard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "cs-guard — 看护/守护：网络 / 环境 / 配置 / 崩溃 / 对话中断 五类故障的检测与恢复",
@@ -25,5 +25,9 @@
       "platform": "web"
     }
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:static": "bash test/ci-static.sh"
+  }
 }
