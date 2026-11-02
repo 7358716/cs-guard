@@ -19,6 +19,8 @@ import { classifyNetwork, PROBE_TARGETS } from './detect/network.js'
 import { detectDegenerate, assessContext, DEFAULT_TOKEN_WARN, DEFAULT_TOKEN_CRITICAL } from './detect/context.js'
 import { checkPatchRefs, checkJsTags, checkBundleConsistency } from './detect/config.js'
 import { assessDisk, assessMemory, assessOvercommit, THRESHOLDS } from './detect/env.js'
+import { decide as decideSupervise, buildRestartRequest, DECISION, DEFAULTS as SUPERVISE_DEFAULTS } from './supervisor/plan.js'
+import { decideResume, compactPrompt, ACTION as RESUME_ACTION } from './repair/resume.js'
 
 const NAME = 'cs-guard'
 const VERSION = '0.2.0'
@@ -97,6 +99,13 @@ export function apply(ctx, rawConfig = {}) {
       thresholds: THRESHOLDS,
       contextThresholds: { warn: DEFAULT_TOKEN_WARN, critical: DEFAULT_TOKEN_CRITICAL },
       probeTargets: PROBE_TARGETS,
+      // 进程外 supervisor 的决策（执行由 supervisor 脚本负责）
+      decideSupervise,
+      buildRestartRequest,
+      superviseDefaults: SUPERVISE_DEFAULTS,
+      // 对话中断续跑
+      decideResume,
+      compactPrompt,
     })
     log(`[${NAME}] 巡检接口已暴露`)
   } else {
@@ -104,4 +113,4 @@ export function apply(ctx, rawConfig = {}) {
   }
 }
 
-export { buildReport as report, classifyNetwork, detectDegenerate, assessContext, assessDisk, assessMemory, assessOvercommit, THRESHOLDS }
+export { buildReport as report, classifyNetwork, detectDegenerate, assessContext, assessDisk, assessMemory, assessOvercommit, THRESHOLDS, decideSupervise, buildRestartRequest, DECISION, decideResume, compactPrompt, RESUME_ACTION }
