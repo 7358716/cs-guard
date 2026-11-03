@@ -12,6 +12,7 @@ import { buildReport } from '../index.js'
 import { PROBE_TARGETS, classifyNetwork } from '../detect/network.js'
 import { THRESHOLDS, assessMemoryHealth } from '../detect/env.js'
 import { judge, sendJson } from './guard.js'
+import { readConfig, writeConfig, withDefaults, DEFAULTS } from '../config/store.js'
 
 export const PREFIX = '/cs-guard'
 
@@ -191,6 +192,17 @@ export function registerRoutes(webServer, opts = {}) {
       report,
       summary: fails === 0 ? '全部通过' : `${fails} 项异常`,
     }
+  })
+
+  // ── 配置（可读写）──
+  route('/config', async ({ body }) => {
+    if (body === undefined) {
+      const raw = await readConfig(opts.dshHome)
+      return { ok: true, config: withDefaults(raw), defaults: DEFAULTS }
+    }
+    const merged = withDefaults(Object.assign({}, await readConfig(opts.dshHome), body))
+    const ok = await writeConfig(opts.dshHome, merged)
+    return { ok, config: merged, hint: ok ? '已保存到 ~/.dsh/cs-guard/config.json' : '保存失败' }
   })
 
   return n

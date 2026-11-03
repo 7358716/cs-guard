@@ -122,6 +122,7 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
     try {
       n = registerRoutes(ws, {
         version: VERSION,
+        dshHome: rawConfig?.dshHome,
         trustedHosts: rawConfig?.trustedHosts ?? [],
         logger: log,
       })

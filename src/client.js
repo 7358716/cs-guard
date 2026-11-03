@@ -102,6 +102,61 @@ window.__ModuleLoader__.load({
       return h(ErrorBoundary, null, h(props.View))
     }
 
+    // ── 可编辑配置 ──
+    function ConfigEditor(props) {
+      const [cfg, setCfg] = react.useState(null)
+      const [msg, setMsg] = react.useState(null)
+      const [busy, setBusy] = react.useState(false)
+      const [tick, setTick] = react.useState(0)
+
+      react.useEffect(() => {
+        api('/config')
+          .then((d) => setCfg((d && d.config) || {}))
+          .catch((e) => setMsg({ ok: false, error: String((e && e.message) || e) }))
+      }, [tick])
+
+      if (!cfg) return h('div', { style: S.dim }, msg ? msg.error : '加载配置…')
+
+      const setPath = (path, v) => setCfg((c) => {
+        const next = JSON.parse(JSON.stringify(c || {}))
+        let cur = next
+        for (let i = 0; i < path.length - 1; i++) { if (!cur[path[i]]) cur[path[i]] = {}; cur = cur[path[i]] }
+        cur[path[path.length - 1]] = v
+        return next
+      })
+      const val = (path) => path.reduce((o, k) => (o == null ? undefined : o[k]), cfg)
+
+      const save = () => {
+        setBusy(true); setMsg(null)
+        api('/config', { method: 'POST', body: JSON.stringify(cfg) })
+          .then((r) => setMsg(r.ok ? { ok: true, text: r.hint } : { ok: false, error: r.error }))
+          .catch((e) => setMsg({ ok: false, error: String((e && e.message) || e) }))
+          .then(() => setBusy(false))
+      }
+
+      return h('div', null,
+        (props.fields || []).map((f) => h('div', { key: f.path.join('.'), style: { marginBottom: '10px' } },
+          h('div', { style: { fontWeight: 500, marginBottom: '3px' } }, f.label),
+          f.hint ? h('div', { style: Object.assign({ marginBottom: '4px' }, S.dim) }, f.hint) : null,
+          f.type === 'bool'
+            ? h('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' } },
+                h('input', { type: 'checkbox', checked: val(f.path) === true, onChange: (e) => setPath(f.path, e.target.checked) }),
+                h('span', { style: S.dim }, val(f.path) === true ? '已开启' : '已关闭'))
+            : h('input', {
+                type: f.type === 'number' ? 'number' : 'text',
+                style: Object.assign({}, S.input, f.type === 'number' ? { width: '180px' } : {}),
+                value: val(f.path) == null ? '' : val(f.path),
+                onChange: (e) => setPath(f.path, f.type === 'number' ? Number(e.target.value) : e.target.value),
+              }))),
+        h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px' } },
+          h('button', { style: S.btn(true), onClick: save, disabled: busy }, busy ? '保存中…' : '保存'),
+          h('button', { style: S.btn(false), onClick: () => { setCfg(null); setMsg(null); setTick((n) => n + 1) } }, '重新加载')),
+        msg ? h('div', { style: Object.assign({ marginTop: '10px' }, S.card, { borderColor: msg.ok ? 'rgba(64,160,96,0.5)' : 'rgba(200,80,80,0.5)' }) },
+          h('div', { style: { fontWeight: 600 } }, msg.ok ? '✅ 已保存' : '❌ 保存失败'),
+          h('div', { style: S.dim }, msg.text || msg.error || '')) : null,
+      )
+    }
+
     // ── 总览（一键体检）──
     function OverviewTab() {
       const [res, setRes] = react.useState(null)
@@ -199,27 +254,43 @@ window.__ModuleLoader__.load({
           : null)
     }
 
-    // ── 恢复策略 ──
+    // ── 恢复策略（可编辑）──
     function RepairTab() {
       return h('div', null,
         h('div', { style: S.card },
-          h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, '重启限制'),
-          h(KV, { k: '最小间隔', v: '10 分钟' }),
-          h(KV, { k: '每日上限', v: '3 次' }),
-          h(KV, { k: '前置条件', v: '无活跃轮次' }),
-          h(KV, { k: '防抖', v: '连续 3 次越线才动手' })),
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, '重启限制'),
+          h(ConfigEditor, { fields: [
+            { path: ['restart', 'minIntervalMs'], label: '最小间隔（毫秒）', type: 'number', hint: '600000 = 10 分钟' },
+            { path: ['restart', 'maxPerDay'], label: '每日最多重启次数', type: 'number' },
+            { path: ['restart', 'consecutiveBreaches'], label: '连续越线几次才动手', type: 'number', hint: '防抖，避免误判' },
+            { path: ['restart', 'requireNoActiveTurns'], label: '有活跃对话时禁止重启', type: 'bool' },
+          ] })),
         h('div', { style: S.card },
-          h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, '续跑规则'),
-          h(KV, { k: '最大续跑', v: '2 次' }),
-          h(KV, { k: '退化场景', v: '必须先压缩上下文，再重试' }),
-          h(KV, { k: '用尽后', v: '交人工判断' })),
-        h('div', { style: S.bomb },
-          h('div', { style: { fontWeight: 600 } }, '⚠️ 安全边界'),
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, '续跑规则'),
+          h(ConfigEditor, { fields: [
+            { path: ['resume', 'maxAttempts'], label: '最大续跑次数', type: 'number' },
+            { path: ['resume', 'compactBeforeRetry'], label: '退化时先压缩再重试', type: 'bool', hint: '关掉会重复得到退化输出' },
+          ] })),
+        h('div', { style: S.card },
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, '检测阈值'),
+          h(ConfigEditor, { fields: [
+            { path: ['context', 'warnTokens'], label: '上下文预警水位（tokens）', type: 'number' },
+            { path: ['context', 'criticalTokens'], label: '上下文危险水位（tokens）', type: 'number' },
+          ] })),
+        h('div', { style: S.card },
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, '监控开关'),
+          h(ConfigEditor, { fields: [
+            { path: ['watch', 'network'], label: '网络监控', type: 'bool' },
+            { path: ['watch', 'context'], label: '对话质量监控', type: 'bool' },
+            { path: ['watch', 'env'], label: '环境监控', type: 'bool' },
+            { path: ['watch', 'overcommit'], label: 'overcommit 监控', type: 'bool' },
+            { path: ['watch', 'config'], label: '配置监控', type: 'bool' },
+          ] })),
+        h('div', { style: { border: '1px solid rgba(200,80,80,0.5)', borderRadius: '8px', padding: '10px 12px', background: 'rgba(200,80,80,0.06)' } },
+          h('div', { style: { fontWeight: 600 } }, '⚠️ 安全边界（不可修改）'),
           h('div', { style: Object.assign({ marginTop: '4px' }, S.dim) },
-            '本插件不会自动删除或移动任何文件。重启仅在没有活跃对话时、且受限速与每日上限约束下才会请求。')),
-        h('div', { style: S.card },
-          h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, '权限边界'),
-          RULES.map((r) => h(KV, { key: r[0], k: r[0], v: r[1] }))))
+            '本插件永远不会自动删除或移动文件。重启请求还需同时满足：无活跃对话 + 未触发限速 + 未超每日上限。')),
+      )
     }
 
     const VIEWS = { overview: OverviewTab, network: NetworkTab, context: ContextTab, env: EnvTab, config: ConfigTab, repair: RepairTab }
