@@ -20,6 +20,10 @@ const fakeReact = {
   useMemo: (f) => f(),
   useCallback: (f) => f,
   useRef: (init) => ({ current: init }),
+  Component: class {
+    constructor(props) { this.props = props || {}; this.state = {} }
+    setState(s) { this.state = Object.assign({}, this.state, typeof s === 'function' ? s(this.state) : s) }
+  },
 }
 
 /** 执行 client.js，返回被 ModuleLoader 收到的声明 */

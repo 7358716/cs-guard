@@ -68,6 +68,40 @@ window.__ModuleLoader__.load({
         h('span', { style: Object.assign({ textAlign: 'right', marginLeft: '12px' }, props.dim ? S.dim : null) }, props.v))
     }
 
+    // ── 错误边界（关键：一个分区崩了不能拖垮整页 → 白屏）──
+    class ErrorBoundary extends react.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+      static getDerivedStateFromError(error) { return { error: error } }
+      componentDidCatch(error, info) {
+        try { console.error('[cs-guard] 分区渲染失败：', (error && error.message) || error, info) } catch (_) {}
+      }
+      render() {
+        if (this.state.error) {
+          const err = this.state.error
+          return h('div', {
+            style: {
+              border: '1px solid rgba(200,80,80,0.5)', borderRadius: '8px',
+              padding: '12px 14px', background: 'rgba(200,80,80,0.06)',
+            },
+          },
+            h('div', { style: { fontWeight: 600, color: 'var(--dsw-alias-state-error-primary)' } },
+              '这个分区渲染失败了（其它分区不受影响）'),
+            h('div', { style: { marginTop: '6px', fontSize: '11px', fontFamily: 'ui-monospace, monospace', opacity: 0.8 } },
+              String((err && err.message) || err)),
+            h('div', { style: { marginTop: '8px', fontSize: '11px', opacity: 0.65 } },
+              '可以把这段错误发我。点其它标签页仍可使用。'))
+        }
+        return this.props.children
+      }
+    }
+
+    function Safe(props) {
+      return h(ErrorBoundary, null, h(props.View))
+    }
+
     // ── 总览（一键体检）──
     function OverviewTab() {
       const [res, setRes] = react.useState(null)
@@ -204,7 +238,7 @@ window.__ModuleLoader__.load({
         h('div', { style: S.tabs }, TABS.map((t) => h('span', {
           key: t.key, style: S.tab(tab === t.key), onClick: () => setTab(t.key),
         }, t.label))),
-        h(View))
+        h(Safe, { View: View }))
     }
 
     const inject = ['slots']
@@ -224,6 +258,8 @@ window.__ModuleLoader__.load({
     exports.inject = inject
     exports.GuardSection = GuardSection
     exports.TABS = TABS
+    exports.ErrorBoundary = ErrorBoundary
+    exports.Safe = Safe
     return module.exports
   },
 })

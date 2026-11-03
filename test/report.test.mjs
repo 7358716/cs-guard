@@ -25,8 +25,8 @@ test('上下文退化 ⇒ 出 finding（事故场景）', () => {
   assert.ok(r.findings.some((f) => f.type === 'context'))
 })
 
-test('overcommit 超限 ⇒ critical', () => {
-  const r = buildReport({ overcommit: { committedAS: 110, commitLimit: 100 } })
+test('可用内存极低 ⇒ critical（真危险）', () => {
+  const r = buildReport({ memory: { totalBytes: 100, freeBytes: 2 } })
   assert.equal(r.level, 'critical')
 })
 
@@ -42,8 +42,8 @@ test('patch 含 !!js ⇒ 出 finding', () => {
 
 test('多项问题并存时取最严重级别', () => {
   const r = buildReport({
-    overcommit: { committedAS: 110, commitLimit: 100 },
-    disk: { totalBytes: 100, freeBytes: 10 },
+    memory: { totalBytes: 100, freeBytes: 2 },
+    disk: { totalBytes: 100, freeBytes: 2 },
   })
   assert.equal(r.level, 'critical')
   assert.ok(r.findings.length >= 2)

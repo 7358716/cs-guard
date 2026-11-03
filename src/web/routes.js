@@ -10,7 +10,7 @@
 
 import { buildReport } from '../index.js'
 import { PROBE_TARGETS, classifyNetwork } from '../detect/network.js'
-import { THRESHOLDS } from '../detect/env.js'
+import { THRESHOLDS, assessMemoryHealth } from '../detect/env.js'
 import { judge, sendJson } from './guard.js'
 
 export const PREFIX = '/cs-guard'
@@ -39,26 +39,60 @@ async function probeUrl(url, { fetchImpl, timeoutMs = 6000 }) {
   }
 }
 
-/** 读系统内存/overcommit 信息（Linux；其它平台优雅降级） */
-export async function readSystemInfo({ readFileImpl } = {}) {
+/**
+ * 读系统信息（**跨平台**）。
+ *
+ * 🔴 教训（Windows 实测）：`/proc/meminfo` 只存在于 Linux。
+ *    Windows 上会读失败 → 之前显示「⏸ 无法读取」，等于功能废掉。
+ *    改用 Node 内置 `os.totalmem()/freemem()`，三平台都可用。
+ *
+ * Linux 额外读 overcommit（只作辅助信号，容器内必然偏高）。
+ */
+export async function readSystemInfo({ readFileImpl, osImpl } = {}) {
+  const os = osImpl ?? (await import('node:os')).default ?? (await import('node:os'))
   const read = readFileImpl ?? (async (p) => {
     const fs = await import('node:fs/promises')
     return fs.readFile(p, 'utf8')
   })
-  const out = { memory: null, overcommit: null, disk: null }
+
+  const out = {
+    memory: null,
+    overcommit: null,
+    platform: process.platform,
+    source: null,
+  }
+
+  // ① 跨平台主路径：os 模块
   try {
-    const mi = await read('/proc/meminfo')
-    const get = (k) => {
-      const m = new RegExp('^' + k + ':\\s+(\\d+) kB', 'm').exec(mi)
-      return m ? Number(m[1]) * 1024 : null
+    const total = os.totalmem()
+    const free = os.freemem()
+    if (Number.isFinite(total) && total > 0) {
+      out.memory = { totalBytes: total, freeBytes: free }
+      out.source = `os 模块（${process.platform}）`
     }
-    const total = get('MemTotal')
-    const avail = get('MemAvailable')
-    if (total && avail != null) out.memory = { totalBytes: total, freeBytes: avail }
-    const cas = get('Committed_AS')
-    const cl = get('CommitLimit')
-    if (cas && cl) out.overcommit = { committedAS: cas, commitLimit: cl }
-  } catch { /* 非 Linux */ }
+  } catch { /* ignore */ }
+
+  // ② Linux 额外：overcommit（仅辅助，不参与主判定）
+  if (process.platform === 'linux') {
+    try {
+      const mi = await read('/proc/meminfo')
+      const get = (k) => {
+        const m = new RegExp('^' + k + ':\\s+(\\d+) kB', 'm').exec(mi)
+        return m ? Number(m[1]) * 1024 : null
+      }
+      const cas = get('Committed_AS')
+      const cl = get('CommitLimit')
+      if (cas && cl) out.overcommit = { committedAS: cas, commitLimit: cl }
+      // os.freemem 在 Linux 上不含 cache，用 MemAvailable 更准
+      const avail = get('MemAvailable')
+      const total = get('MemTotal')
+      if (avail && total) {
+        out.memory = { totalBytes: total, freeBytes: avail }
+        out.source = '/proc/meminfo（MemAvailable）'
+      }
+    } catch { /* 非 Linux 或读不到 */ }
+  }
+
   return out
 }
 
@@ -69,7 +103,7 @@ export function registerRoutes(webServer, opts = {}) {
   if (!webServer || typeof webServer.register !== 'function') return 0
   const {
     trustedHosts = [], logger = console, fetchImpl = globalThis.fetch,
-    now = () => Date.now(), readFileImpl, resolveFn,
+    now = () => Date.now(), readFileImpl, osImpl, resolveFn,
   } = opts
 
   let n = 0
@@ -131,18 +165,24 @@ export function registerRoutes(webServer, opts = {}) {
         : net.verdict === 'partial' ? `分片损坏：${net.bad.join(', ')}`
           : '全部不可达')
 
-    // 环境
-    const sys = await readSystemInfo({ readFileImpl })
-    const report = buildReport({
-      network: results,
-      memory: sys.memory ?? undefined,
-      overcommit: sys.overcommit ?? undefined,
-      resolveFn,
+    // 环境（跨平台）
+    const sys = await readSystemInfo({ readFileImpl, osImpl })
+    const mem = assessMemoryHealth({
+      totalBytes: sys.memory?.totalBytes,
+      freeBytes: sys.memory?.freeBytes,
+      committedAS: sys.overcommit?.committedAS,
+      commitLimit: sys.overcommit?.commitLimit,
+      inContainer: true,
     })
-    add('内存', sys.memory ? (report.findings.some((f) => f.type === 'memory' && f.level === 'critical') ? false : true) : null,
-      sys.memory ? `${Math.round((1 - sys.memory.freeBytes / sys.memory.totalBytes) * 100)}% 已用` : '无法读取 /proc/meminfo（非 Linux）')
-    add('overcommit', sys.overcommit ? (sys.overcommit.committedAS < sys.overcommit.commitLimit * 0.98) : null,
-      sys.overcommit ? `${(sys.overcommit.committedAS / sys.overcommit.commitLimit * 100).toFixed(1)}%` : '无法读取')
+    const report = buildReport({ network: results })
+    add('内存', mem.level === 'ok' ? true : mem.level === 'warn' ? null : mem.level === 'critical' ? false : null,
+      mem.level === 'unknown'
+        ? `无法读取（${process.platform}）`
+        : `${mem.usedPct}% 已用（可用 ${(100 - mem.usedPct).toFixed(1)}%）· 来源：${sys.source ?? '未知'}`)
+    add('overcommit', null,
+      sys.overcommit
+        ? `${(sys.overcommit.committedAS / sys.overcommit.commitLimit * 100).toFixed(0)}% · 容器内偏高属正常（已不作为判据）`
+        : `不适用（${process.platform} 无此机制）`)
 
     const fails = checks.filter((c) => c.ok === false).length
     return {
