@@ -14,6 +14,12 @@ import vm from 'node:vm'
 const fakeReact = {
   createElement: (type, props, ...children) => ({ type, props, children }),
   Fragment: 'Fragment',
+  // 假 hooks：渲染时只取初值，不执行副作用
+  useState: (init) => [init, () => {}],
+  useEffect: () => {},
+  useMemo: (f) => f(),
+  useCallback: (f) => f,
+  useRef: (init) => ({ current: init }),
 }
 
 /** 执行 client.js，返回被 ModuleLoader 收到的声明 */
@@ -83,7 +89,7 @@ test('apply 会注册 settings.section', () => {
   assert.equal(registered.length, 1)
   assert.equal(registered[0].desc.id, 'cs-guard')
   assert.equal(typeof registered[0].desc.label, 'function', 'label 必须是函数')
-  assert.equal(registered[0].desc.label(), '看护')
+  assert.equal(registered[0].desc.label(), 'Guard')
   assert.equal(typeof registered[0].Component, 'function', '第二个参数必须是组件')
 })
 

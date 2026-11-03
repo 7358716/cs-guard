@@ -21,7 +21,8 @@ import { checkPatchRefs, checkJsTags, checkBundleConsistency } from './detect/co
 import { assessDisk, assessMemory, assessOvercommit, THRESHOLDS } from './detect/env.js'
 import { decide as decideSupervise, buildRestartRequest, DECISION, DEFAULTS as SUPERVISE_DEFAULTS } from './supervisor/plan.js'
 import { decideResume, compactPrompt, ACTION as RESUME_ACTION } from './repair/resume.js'
-import { guardApply, makeLogger, safeEffect, safeProvide, detectHostVersion } from './compat.js'
+import { guardApply, makeLogger, safeEffect, safeProvide, safeInject, detectHostVersion } from './compat.js'
+import { registerRoutes, PREFIX as API_PREFIX } from './web/routes.js'
 
 const NAME = 'cs-guard'
 const VERSION = '0.2.0'
@@ -112,6 +113,25 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
   })
   if (provided) log.info('巡检接口已暴露')
   else log.warn('宿主无 provide：巡检接口仅内部可用（功能不受影响）')
+
+  // ── HTTP API（设置页数据源；全部过 guard）──
+  const routesOk = safeInject(ctx, ['webServer'], (scoped) => {
+    const ws = scoped?.webServer ?? (typeof scoped?.get === 'function' ? scoped.get('webServer', false) : null)
+    if (!ws) { log.debug('无 webServer：HTTP API 未注册'); return }
+    let n = 0
+    try {
+      n = registerRoutes(ws, {
+        version: VERSION,
+        trustedHosts: rawConfig?.trustedHosts ?? [],
+        logger: log,
+      })
+    } catch (err) {
+      log.warn(`API 注册异常：${err?.message ?? err}`)
+    }
+    if (n > 0) log.info(`HTTP API 已注册 ${n} 条：${API_PREFIX}/*`)
+    else log.warn('HTTP API 注册失败（设置页会显示无数据）')
+  }, `${NAME}: webServer`)
+  if (!routesOk) log.debug('宿主无 inject：跳过 HTTP API')
 
   log.info('启动完成')
 }, NAME)
