@@ -1,5 +1,5 @@
 /**
- * cs-myfree — 宿主兼容层（永不抛错）
+ * cs-guard — 宿主兼容层（永不抛错）
  *
  * 背景：DSH 0.1.x/0.2.0-rc1/0.2.1-rc2 之间 API 有差异。
  * 插件一旦在加载期抛错，宿主会报 `N entry did not activate`
@@ -7,12 +7,28 @@
  *
  * 铁律：**本模块任何函数都不允许抛错**。拿不到能力就降级，绝不让宿主挂掉。
  *
- * @module cs-myfree/compat
+ * @module cs-guard/compat
  */
 
 /** 安全地探测一个对象上是否有某方法 */
 export function has(obj, key) {
   try { return obj != null && typeof obj[key] === 'function' } catch { return false }
+}
+
+/**
+ * 文本脱敏：URL 里的 userinfo / query 里的 token 类参数一律打码。
+ *
+ * 🔴 安全红线：日志、API 错误、UI 都**不得**出现凭据/token。
+ */
+export function redactText(input) {
+  let s = String(input ?? '')
+  try {
+    s = s.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1***@')
+    s = s.replace(/([?&](?:token|access_token|refresh_token|api[_-]?key|apikey|key|secret|password)=)[^&\s"']+/gi, '$1***')
+    s = s.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g, '$1 ***')
+    s = s.replace(/\b(sk|pk)-[A-Za-z0-9_-]{10,}/g, '***')
+  } catch { /* 保底不抛 */ }
+  return s
 }
 
 /** 安全调用（吞掉异常，返回 fallback） */
@@ -131,9 +147,15 @@ export function guardApply(fn, name) {
       log.info('加载完成')
     } catch (err) {
       // 🔴 绝不 rethrow：让宿主继续启动，只是本插件功能不可用
+      const msg = `[${name}] 加载失败（已降级，不影响宿主启动）：${redactText(String(err?.message ?? err)).slice(0, 300)}`
+      try { log.error(msg) } catch { /* ignore */ }
+      // 🔑 v1.8.0：宿主 logger 可能进内存/文件而终端看不到；再兜底打 stderr，
+      //    否则「插件静默消失、宿主一切正常」对运维完全不可见（故障注入实测）。
       try {
-        log.error(`加载失败（已降级，不影响宿主启动）：${err?.message ?? err}`)
-        if (err?.stack) log.debug(String(err.stack).slice(0, 800))
+        if (typeof console !== 'undefined' && typeof console.error === 'function') console.error(msg)
+      } catch { /* ignore */ }
+      try {
+        if (err?.stack) log.debug(redactText(String(err.stack)).slice(0, 800))
       } catch { /* ignore */ }
     }
   }

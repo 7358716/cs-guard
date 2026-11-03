@@ -53,3 +53,12 @@ test('空输入不崩且判 ok', () => {
   const r = buildReport({})
   assert.equal(r.level, 'ok')
 })
+
+// ── v1.8.0：本插件配置损坏必须进报告（环境故障不得静默）──
+test('cs-guard 配置损坏 ⇒ 出 config finding（warn）', () => {
+  const r = buildReport({ configError: '配置文件 JSON 损坏：Unexpected token' })
+  assert.equal(r.level, 'warn')
+  const f = r.findings.find((x) => x.type === 'config')
+  assert.ok(f)
+  assert.match(f.detail, /cs-guard 配置文件异常/)
+})

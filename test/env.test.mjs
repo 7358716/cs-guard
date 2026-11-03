@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { assessDisk, assessMemory, assessMemoryHealth, assessOvercommit, THRESHOLDS } from '../src/detect/env.js'
+import { assessDisk, assessMemory, assessMemoryHealth, assessOvercommit, assessStatfs, THRESHOLDS } from '../src/detect/env.js'
 
 test('磁盘 ok/warn/critical 三档', () => {
   assert.equal(assessDisk({ totalBytes: 100, freeBytes: 50 }).level, 'ok')
@@ -42,4 +42,20 @@ test('assessOvercommit 保留兼容但不再误判', () => {
 test('阈值符合保守设定', () => {
   assert.equal(THRESHOLDS.diskCriticalPct, 95)
   assert.equal(THRESHOLDS.memCriticalPct, 95)
+})
+
+// ── v1.8.0：磁盘真实水位（此前 /diag 完全不读磁盘 ⇒ 环境页磁盘永远没数据）──
+test('assessStatfs：正常换算 usedPct/剩余空间', () => {
+  const r = assessStatfs({ blocks: 1000, bavail: 500, bsize: 4096 })
+  assert.equal(r.level, 'ok')
+  assert.equal(r.usedPct, 50)
+})
+test('assessStatfs：>95% 已用 ⇒ critical', () => {
+  const r = assessStatfs({ blocks: 100, bavail: 2, bsize: 1024 })
+  assert.equal(r.level, 'critical')
+})
+test('assessStatfs：字段缺失/非法 ⇒ unknown（不误判健康）', () => {
+  for (const bad of [{}, { blocks: 0 }, { blocks: 'x', bavail: 1, bsize: 1 }]) {
+    assert.equal(assessStatfs(bad).level, 'unknown')
+  }
 })

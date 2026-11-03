@@ -36,6 +36,24 @@ export function assessDisk(s = {}) {
   }
 }
 
+/**
+ * 把 `fs.statfs()` 的结果换算成磁盘水位（纯函数，便于测试）。
+ *
+ * 🟡 真实故障注入教训：此前 `/diag` **只读内存不读磁盘**，
+ *    设置页「环境（磁盘/内存）」的磁盘一栏永远没有数据（假绿）。
+ *
+ * @param {{blocks?:number, bavail?:number, bfree?:number, bsize?:number}} st
+ */
+export function assessStatfs(st = {}) {
+  const blocks = Number(st?.blocks)
+  const avail = Number(st?.bavail)
+  const bsize = Number(st?.bsize)
+  if (!Number.isFinite(blocks) || !Number.isFinite(avail) || !Number.isFinite(bsize) || blocks <= 0 || bsize <= 0) {
+    return { level: 'unknown', usedPct: null, advice: '无法读取磁盘信息' }
+  }
+  return assessDisk({ totalBytes: blocks * bsize, freeBytes: avail * bsize })
+}
+
 /** 判定内存水位 */
 export function assessMemory(s = {}) {
   const total = Number(s.totalBytes)

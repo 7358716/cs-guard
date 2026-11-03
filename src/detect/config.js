@@ -17,6 +17,13 @@ export function checkPatchRefs(patchText, resolveFn) {
   const problems = []
   const lines = String(patchText ?? '').split('\n')
   for (let i = 0; i < lines.length; i++) {
+    // 🔴 v1.8.0 修复（真实 profile 误报）：只认**顶层 patch 条目**的 id
+    //    （缩进 0，或 `- insert:` 下的条目缩进 ≤4）。
+    //    旧实现匹配任意缩进的 `id:`，把插件 config 里的业务键当成包引用：
+    //    实测 profile 的 cs-myfree 配置里 `lanes: - id: free  name: 免费车道`
+    //    被误报成「patch 引用了无法解析的包: 免费车道」。
+    const lead = /^(\s*)/.exec(lines[i])[1].length
+    if (lead > 4) continue
     const idm = /^\s*-?\s*(?:insert:\s*)?(?:-\s*)?id:\s*([^\s#]+)/.exec(lines[i])
     if (!idm) continue
     const id = idm[1].trim()

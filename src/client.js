@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
       tab: (on) => ({ cursor: 'pointer', padding: '3px 10px', borderRadius: '5px', fontSize: '12px', fontWeight: on ? 600 : 400, background: on ? 'rgba(128,128,128,0.18)' : 'transparent', border: '1px solid ' + (on ? 'rgba(128,128,128,0.4)' : 'transparent') }),
       btn: (primary) => ({ cursor: 'pointer', fontSize: '12px', padding: '3px 12px', borderRadius: '5px', border: '1px solid rgba(128,128,128,0.4)', background: primary ? 'rgba(64,160,96,0.18)' : 'transparent', color: 'inherit', fontWeight: primary ? 600 : 400 }),
       dim: { opacity: 0.65, fontSize: '11px' },
+      input: { padding: '3px 8px', borderRadius: '5px', border: '1px solid rgba(128,128,128,0.4)', background: 'transparent', color: 'inherit', fontSize: '12px' },
       bomb: { border: '1px solid rgba(200,80,80,0.5)', borderRadius: '8px', padding: '10px 12px', marginBottom: '12px', background: 'rgba(200,80,80,0.06)' },
     }
 
@@ -33,6 +34,7 @@ window.__ModuleLoader__.load({
       { key: 'context', label: '对话质量' },
       { key: 'env', label: '环境' },
       { key: 'config', label: '配置' },
+      { key: 'resume', label: '对话中断' },
       { key: 'repair', label: '恢复策略' },
     ]
 
@@ -173,7 +175,8 @@ window.__ModuleLoader__.load({
           h('button', { style: S.btn(true), onClick: run, disabled: busy }, busy ? '体检中…' : '一键体检'),
           h('span', { style: S.dim }, '真实探测网络（4 个目标）+ 读内存/overcommit')),
         res ? h('div', { style: S.card },
-          h('div', { style: { fontWeight: 600, marginBottom: '8px' } }, (res.ok ? '✅ ' : '❌ ') + (res.summary || '')),
+          h('div', { style: { fontWeight: 600, marginBottom: '8px' } },
+            (res.level === 'critical' || (!res.level && res.ok === false) ? '❌ ' : res.level === 'warn' ? '⚠️ ' : '✅ ') + (res.summary || '')),
           (res.checks || []).map((c, i) => h('div', { key: i, style: S.row },
             h('span', null, (c.ok === true ? '✅ ' : c.ok === false ? '❌ ' : '⏸ ') + c.name),
             h('span', { style: Object.assign({ textAlign: 'right', marginLeft: '12px' }, S.dim) }, String(c.detail || ''))))) : null)
@@ -226,7 +229,7 @@ window.__ModuleLoader__.load({
           .then((r) => setRes(r)).catch((e) => setRes({ error: String((e && e.message) || e) }))
           .then(() => setBusy(false))
       }
-      const checks = (res && res.checks || []).filter((c) => /内存|overcommit/.test(c.name))
+      const checks = (res && res.checks || []).filter((c) => /磁盘|内存|overcommit/.test(c.name))
       return h('div', null,
         h('button', { style: S.btn(true), onClick: run, disabled: busy }, busy ? '读取中…' : '读取环境'),
         checks.length ? h('div', { style: Object.assign({ marginTop: '10px' }, S.card) },
@@ -250,7 +253,10 @@ window.__ModuleLoader__.load({
         res ? h('div', { style: Object.assign({ marginTop: '10px' }, S.card) },
           cfg.length === 0
             ? h('div', { style: { color: 'var(--dsw-alias-state-success-primary)' } }, '✅ 未发现配置问题')
-            : cfg.map((f, i) => h('div', { key: i, style: S.bomb }, f.detail)))
+            : cfg.map((f, i) => h('div', { key: i, style: S.bomb }, f.detail)),
+          (res.checks || []).filter((c) => /配置|cordis|patch|bundle/.test(c.name)).map((c, i) => h(KV, {
+            key: 'c' + i, k: (c.ok === true ? '✅ ' : c.ok === false ? '❌ ' : '⏸ ') + c.name, v: String(c.detail || ''),
+          })))
           : null)
     }
 
@@ -293,7 +299,65 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const VIEWS = { overview: OverviewTab, network: NetworkTab, context: ContextTab, env: EnvTab, config: ConfigTab, repair: RepairTab }
+
+    // ── 对话中断（续跑决策：压缩 / 重试 / 交人）──
+    const RESUME_KINDS = [
+      { v: 'completed', t: '正常结束 completed' },
+      { v: 'error', t: '异常结束 error' },
+      { v: 'interrupted', t: '连接中断 interrupted' },
+      { v: 'max-tokens', t: '输出触顶 max-tokens' },
+      { v: 'aborted', t: '中止 aborted' },
+    ]
+
+    function ResumeTab() {
+      const [reason, setReason] = react.useState('error')
+      const [attempt, setAttempt] = react.useState(0)
+      const [tokens, setTokens] = react.useState(0)
+      const [text, setText] = react.useState('')
+      const [res, setRes] = react.useState(null)
+      const [busy, setBusy] = react.useState(false)
+      const run = () => {
+        setBusy(true); setRes(null)
+        const body = { reason: reason, attempt: Number(attempt) || 0, inputTokens: Number(tokens) || undefined, text: text || undefined }
+        api('/resume', { method: 'POST', body: JSON.stringify(body) })
+          .then((r) => setRes(r))
+          .catch((e) => setRes({ ok: false, error: String((e && e.message) || e) }))
+          .then(() => setBusy(false))
+      }
+      const d = res && res.decision
+      return h('div', null,
+        h('div', { style: S.card },
+          h('div', { style: { fontWeight: 600, marginBottom: '6px' } }, '会话中断后怎么恢复'),
+          h('div', { style: Object.assign({ marginBottom: '10px' }, S.dim) },
+            '按 turn/end 的真实 reason 判定：退化/max-tokens ⇒ 压缩后重试；用户主动中止 / 凭据类错误 ⇒ 交人；瞬态错误 ⇒ 重试。'),
+          h('div', { style: { marginBottom: '8px' } },
+            h('span', null, '结束原因 '),
+            h('select', {
+              style: S.input, value: reason,
+              onChange: (e) => setReason(e.target.value),
+            }, RESUME_KINDS.map((k) => h('option', { key: k.v, value: k.v }, k.t)))),
+          h('div', { style: { marginBottom: '8px' } },
+            h('span', null, '已续跑次数 '),
+            h('input', { type: 'number', style: Object.assign({ width: '90px' }, S.input), value: attempt, onChange: (e) => setAttempt(Number(e.target.value)) }),
+            h('span', { style: { marginLeft: '14px' } }, '输入 tokens '),
+            h('input', { type: 'number', style: Object.assign({ width: '150px' }, S.input), value: tokens, onChange: (e) => setTokens(Number(e.target.value)) })),
+          h('div', { style: { marginBottom: '10px' } },
+            h('div', { style: S.dim }, '最近一次输出（可选：用于识别退化模板）'),
+            h('textarea', {
+              style: Object.assign({ width: '100%', minHeight: '54px', fontFamily: 'inherit' }, S.input),
+              value: text, onChange: (e) => setText(e.target.value),
+            })),
+          h('button', { style: S.btn(true), onClick: run, disabled: busy }, busy ? '判定中…' : '获取续跑决策')),
+        d ? h('div', { style: S.card },
+          h('div', { style: { fontWeight: 600, marginBottom: '6px' } },
+            (d.action === 'none' ? '✅ ' : d.action === 'ask-human' ? '🙋 ' : '🔁 ') + '决策：' + d.action),
+          h(KV, { k: '原因', v: String(d.reason || '') }),
+          h(KV, { k: '上下文水位', v: (res.context && (res.context.level + ' / ' + (res.context.inputTokens == null ? '未知' : res.context.inputTokens + ' tokens'))) || '' }),
+          res.brief ? h('pre', { style: { whiteSpace: 'pre-wrap', fontSize: '11px', marginTop: '8px' } }, res.brief) : null)
+          : res && res.error ? h('div', { style: S.bomb }, res.error) : null)
+    }
+
+    const VIEWS = { overview: OverviewTab, network: NetworkTab, context: ContextTab, env: EnvTab, config: ConfigTab, resume: ResumeTab, repair: RepairTab }
 
     function GuardSection() {
       const [tab, setTab] = react.useState('overview')
@@ -329,6 +393,8 @@ window.__ModuleLoader__.load({
     exports.inject = inject
     exports.GuardSection = GuardSection
     exports.TABS = TABS
+    exports.VIEWS = VIEWS
+    exports.ResumeTab = ResumeTab
     exports.ErrorBoundary = ErrorBoundary
     exports.Safe = Safe
     return module.exports

@@ -20,13 +20,19 @@ export const PROBE_TARGETS = Object.freeze([
 
 /**
  * 把探测结果归类成「分片坏」结论。
+ *
+ * 🔴 v1.8.0 修复：第二参数 targets 支持**自定义探测目标**（此前只认内置 4 个 id，
+ *    自定义目标的结果被直接忽略 ⇒ 全断也判 healthy）。
+ *
  * @param {Array<{id:string, ok:boolean, ms?:number, err?:string}>} results
+ * @param {Array<{id:string, label?:string, cls?:string}>} [targets]
  */
-export function classifyNetwork(results = []) {
+export function classifyNetwork(results = [], targets = PROBE_TARGETS) {
+  const list = Array.isArray(targets) && targets.length > 0 ? targets : PROBE_TARGETS
   const by = new Map(results.map((r) => [r.id, r]))
   const bad = []
   const ok = []
-  for (const t of PROBE_TARGETS) {
+  for (const t of list) {
     const r = by.get(t.id)
     if (!r) continue
     ;(r.ok ? ok : bad).push(t.id)
@@ -35,16 +41,22 @@ export function classifyNetwork(results = []) {
     : ok.length === 0 ? 'all-down'
     : 'partial'
 
+  const impactOf = (id) => {
+    if (id === 'github-api') return '代码托管不可达（git 操作会失败，但对话不受影响）'
+    if (id === 'api-deepseek') return '模型 API 不可达（可能导致全渠道失败）'
+    if (id === 'npm-mirror') return '装包不可达'
+    const cls = list.find((t) => t.id === id)?.cls
+    if (cls === 'model-api') return '模型 API 不可达（可能导致全渠道失败）'
+    if (cls === 'package') return '装包不可达'
+    if (cls === 'code-host') return '代码托管不可达（git 操作会失败，但对话不受影响）'
+    return '基础网络异常'
+  }
+
   return {
     verdict,
     ok,
     bad,
     // 关键：给出「哪些能力受影响」而不是只报一个总数
-    impact: bad.map((id) => {
-      if (id === 'github-api') return '代码托管不可达（git 操作会失败，但对话不受影响）'
-      if (id === 'api-deepseek') return '模型 API 不可达（可能导致全渠道失败）'
-      if (id === 'npm-mirror') return '装包不可达'
-      return '基础网络异常'
-    }),
+    impact: bad.map(impactOf),
   }
 }

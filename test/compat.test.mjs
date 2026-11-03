@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   has, safeCall, detectHostVersion, parseVersion, makeLogger,
-  safeEffect, safeInject, safeProvide, safeRegisterAdapter, safeRegisterSearch, guardApply,
+  safeEffect, safeInject, safeProvide, safeRegisterAdapter, safeRegisterSearch, guardApply, redactText,
 } from '../src/compat.js'
 
 test('has 对 null/undefined 返回 false 不抛', () => {
@@ -77,4 +77,33 @@ test('guardApply：连 logger 都坏也不抛', () => {
 test('guardApply：ctx 为 null 也不抛', () => {
   const f = guardApply((c) => { if (!c) throw new Error('no ctx') }, 't')
   assert.doesNotThrow(() => f(null, {}))
+})
+
+// ── v1.8.0：崩溃可见性 + 日志脱敏（故障注入发现「降级后终端完全没输出」）──
+test('guardApply 抛错时兜底 console.error（降级对运维可见）', () => {
+  const got = []
+  const orig = console.error
+  console.error = (...args) => got.push(args.join(' '))
+  try {
+    const f = guardApply(() => { throw new Error('FAULT-INJECTION boom') }, 'cs-guard')
+    assert.doesNotThrow(() => f({}, {}))
+    assert.ok(got.some((s) => s.includes('加载失败') && s.includes('已降级')), got.join('\n'))
+    assert.ok(got.some((s) => s.includes('FAULT-INJECTION boom')))
+  } finally {
+    console.error = orig
+  }
+})
+test('redactText 打码 URL 凭据 / token / Bearer', () => {
+  const s = redactText('https://alice:pw@example.com/x?token=abc123&api_key=k1 Authorization: Bearer abcdefghijklmnop sk-1234567890abcdef')
+  assert.ok(!s.includes('alice'))
+  assert.ok(!s.includes('abc123'))
+  assert.ok(!s.includes('k1\n'))
+  assert.ok(!s.includes('abcdefghijklmnop'))
+  assert.ok(!s.includes('1234567890abcdef'))
+  assert.ok(s.includes('***'))
+})
+test('redactText 空值/非字符串不抛', () => {
+  assert.equal(redactText(undefined), '')
+  assert.equal(redactText(null), '')
+  assert.doesNotThrow(() => redactText({ a: 1 }))
 })

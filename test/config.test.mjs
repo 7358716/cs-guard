@@ -30,3 +30,30 @@ test('bundles 有但 deps 没有 ⇒ 报警', () => {
 test('一致则通过', () => {
   assert.equal(checkBundleConsistency(['cs-myfree'], { 'cs-myfree': 'link:.' }).ok, true)
 })
+
+
+// ── v1.8.0 修复：插件 config 里的业务 id 不能被误报成包引用 ──
+test('真实 profile 片段：lanes 里的 id/name 不误报（缩进 >4 不是 patch 条目）', () => {
+  const patch = [
+    '- id: cs-myfree',
+    "  name: 'cs-myfree'",
+    '  config:',
+    '    lanes:',
+    '      - id: free',
+    '        name: 免费车道',
+    '      - id: kilo',
+    '        name: Kilo 免费池',
+  ].join('\n')
+  const r = checkPatchRefs(patch, (n) => n === 'cs-myfree')
+  assert.equal(r.ok, true, r.problems.join('；'))
+})
+
+test('顶层未解析条目仍然能检出', () => {
+  const r = checkPatchRefs('- id: ghost\n  name: ghost-plugin', () => false)
+  assert.equal(r.ok, false)
+})
+
+test('insert 列表里的条目仍然能检出（缩进 4）', () => {
+  const r = checkPatchRefs('- insert:\n    - id: ghost\n      name: ghost-plugin', () => false)
+  assert.equal(r.ok, false)
+})

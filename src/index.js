@@ -21,11 +21,14 @@ import { checkPatchRefs, checkJsTags, checkBundleConsistency } from './detect/co
 import { assessDisk, assessMemory, assessOvercommit, THRESHOLDS } from './detect/env.js'
 import { decide as decideSupervise, buildRestartRequest, DECISION, DEFAULTS as SUPERVISE_DEFAULTS } from './supervisor/plan.js'
 import { decideResume, compactPrompt, ACTION as RESUME_ACTION } from './repair/resume.js'
-import { guardApply, makeLogger, safeEffect, safeProvide, safeInject, detectHostVersion } from './compat.js'
+import { guardApply, makeLogger, safeEffect, safeProvide, safeInject, detectHostVersion, redactText } from './compat.js'
 import { registerRoutes, PREFIX as API_PREFIX } from './web/routes.js'
+import { normalizeBootConfig, validateUserConfig, redactSecrets } from './config/validate.js'
+import { inspectProfile, detectProfileName, DEFAULT_PROFILE } from './detect/profile.js'
+import { readConfigState, withDefaults, DEFAULTS, resolveDshHome } from './config/store.js'
 
 const NAME = 'cs-guard'
-const VERSION = '1.7.0'
+const VERSION = '1.8.0'
 
 export const name = NAME
 export const version = VERSION
@@ -70,6 +73,10 @@ export function buildReport(input = {}) {
     const b = checkBundleConsistency(input.profile.bundles, input.profile.deps)
     if (!b.ok) findings.push({ type: 'config', level: 'warn', detail: b.problems.join('；') })
   }
+  // 本插件自己的配置文件损坏（环境故障）：必须上报，不能静默用默认值
+  if (input.configError) {
+    findings.push({ type: 'config', level: 'warn', detail: `cs-guard 配置文件异常：${input.configError}` })
+  }
 
   const worst = findings.reduce((acc, f) => (f.level === 'critical' ? 'critical' : acc === 'critical' ? 'critical' : f.level === 'warn' ? 'warn' : acc), 'ok')
   return {
@@ -89,6 +96,19 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
   const log = makeLogger(ctx, NAME)
   log.info(`v${VERSION} 启动（宿主 ${detectHostVersion(ctx) ?? '版本未知'}）`)
 
+  // 🔴 配置故障必须**安全降级**：类型错误只记 warning，绝不让 apply 抛错 / API 500
+  const boot = normalizeBootConfig(rawConfig)
+  for (const w of boot.warnings) log.warn(`配置降级：${w}`)
+
+  // 宿主 connection 服务（真实会话校验）：每请求惰性取，避免服务晚就绪拿不到
+  const getConnection = () => {
+    try {
+      const viaGet = typeof ctx?.get === 'function' ? ctx.get('connection', false) : null
+      if (viaGet) return viaGet
+      return ctx?.connection ?? null
+    } catch { return null }
+  }
+
   // 释放钩子（宿主无 effect 就跳过）
   const effectOk = safeEffect(ctx, () => () => { log.info('已释放') }, `${NAME}: root`)
   if (!effectOk) log.debug('宿主无 effect：跳过释放钩子')
@@ -104,7 +124,7 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
     assessOvercommit,
     thresholds: THRESHOLDS,
     contextThresholds: { warn: DEFAULT_TOKEN_WARN, critical: DEFAULT_TOKEN_CRITICAL },
-    probeTargets: PROBE_TARGETS,
+    probeTargets: boot.probeTargets,
     decideSupervise,
     buildRestartRequest,
     superviseDefaults: SUPERVISE_DEFAULTS,
@@ -122,12 +142,16 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
     try {
       n = registerRoutes(ws, {
         version: VERSION,
-        dshHome: rawConfig?.dshHome,
-        trustedHosts: rawConfig?.trustedHosts ?? [],
+        dshHome: boot.dshHome,
+        trustedHosts: boot.trustedHosts,
+        probeTargets: boot.probeTargets,
+        probeTimeoutMs: boot.probeTimeoutMs,
+        profileName: boot.profileName ?? detectProfileName(),
+        getConnection,
         logger: log,
       })
     } catch (err) {
-      log.warn(`API 注册异常：${err?.message ?? err}`)
+      log.warn(`API 注册异常：${redactText(String(err?.message ?? err)).slice(0, 200)}`)
     }
     if (n > 0) log.info(`HTTP API 已注册 ${n} 条：${API_PREFIX}/*`)
     else log.warn('HTTP API 注册失败（设置页会显示无数据）')
@@ -137,4 +161,9 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
   log.info('启动完成')
 }, NAME)
 
+export {
+  normalizeBootConfig, validateUserConfig, redactSecrets, inspectProfile,
+  detectProfileName, DEFAULT_PROFILE, readConfigState, withDefaults, DEFAULTS, resolveDshHome,
+  registerRoutes as registerGuardRoutes,
+}
 export { buildReport as report, classifyNetwork, detectDegenerate, assessContext, assessDisk, assessMemory, assessOvercommit, THRESHOLDS, decideSupervise, buildRestartRequest, DECISION, decideResume, compactPrompt, RESUME_ACTION }
