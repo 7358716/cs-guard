@@ -25,7 +25,7 @@ import { guardApply, makeLogger, safeEffect, safeProvide, safeInject, detectHost
 import { registerRoutes, PREFIX as API_PREFIX } from './web/routes.js'
 
 const NAME = 'cs-guard'
-const VERSION = '0.2.0'
+const VERSION = '1.5.0'
 
 export const name = NAME
 export const version = VERSION
