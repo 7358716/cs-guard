@@ -2,7 +2,7 @@
   "name": "cs-guard",
   "version": "1.8.0",
   "type": "module",
-  "description": "cs-guard \u2014 \u770b\u62a4/\u5b88\u62a4\uff1a\u7f51\u7edc / \u73af\u5883 / \u914d\u7f6e / \u5d29\u6e83 / \u5bf9\u8bdd\u4e2d\u65ad \u4e94\u7c7b\u6545\u969c\u7684\u68c0\u6d4b\u4e0e\u6062\u590d",
+  "description": "Guard — 自建巡护：网络、环境、配置、崩溃、对话中断检测与恢复。",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -29,7 +29,7 @@
       "tested": [
         ">=0.2.1-rc.2"
       ],
-      "note": "\u5bbf\u4e3b rc1 \u4e5f\u80fd\u52a0\u8f7d\uff08\u5bbf\u4e3b\u673a\u517c\u5bb9\u5c42 + \u5ba2\u6237\u7aef\u9632\u5fa1\u5f0f\u6ce8\u518c\uff09"
+      "note": "宿主 rc1 也能加载（宿主机兼容层 + 客户端防御式注册）"
     }
   },
   "license": "MIT",
