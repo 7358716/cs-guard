@@ -154,3 +154,46 @@ test('safeErrorText 脱敏 URL 凭据与 token', () => {
   assert.ok(!s.includes('abc123'))
   assert.ok(s.includes('***'))
 })
+
+// ── 2026-11-04 测试回归（真实 P0 安全漏洞）──────────────────────────────
+// 🔴 P0-1：代理请求（remoteAddress=127.0.0.1 但带 X-Forwarded-*）不得按
+//   loopback 放行 —— 否则 Host: localhost 即可绕过会话校验（公网 nginx 实测可利用）。
+test('2026-11-04 P0-1：代理请求带 X-Forwarded-For 不得按 loopback 放行', () => {
+  const proxied = {
+    headers: { host: 'localhost', 'x-forwarded-for': '1.2.3.4' },
+    socket: { remoteAddress: '127.0.0.1' },
+  }
+  const v = judge(proxied, {})
+  assert.equal(v.ok, false)
+  assert.equal(v.status, 403)
+  assert.match(v.reason, /proxied-without-auth/)
+})
+
+test('2026-11-04 P0-1：代理请求带 X-Real-IP 同样不得放行', () => {
+  const proxied = {
+    headers: { host: '127.0.0.1', 'x-real-ip': '8.8.8.8' },
+    socket: { remoteAddress: '127.0.0.1' },
+  }
+  assert.equal(judge(proxied, {}).ok, false)
+})
+
+test('2026-11-04 P0-1：无代理头时 loopback + localhost 仍放行', () => {
+  const direct = { headers: { host: 'localhost' }, socket: { remoteAddress: '127.0.0.1' } }
+  assert.equal(judge(direct, {}).ok, true)
+})
+
+// 🔴 P0-2：trustedHosts 参数此前被接受但从未使用（死代码）。
+test('2026-11-04 P0-2：trustedHosts 生效（能走到 connection 校验而非直接拒）', () => {
+  const r = { headers: { host: 'example.com' }, socket: { remoteAddress: '10.0.0.5' } }
+  // 无 connection 服务时：可信 Host 也必须真实会话校验 → fail-closed
+  const v = judge(r, { trustedHosts: ['example.com'] })
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /trusted-host-without-session/)
+})
+
+test('2026-11-04 P0-2：不可信 Host 不在清单里 → 走外部校验路径', () => {
+  const r = { headers: { host: 'evil.example' }, socket: { remoteAddress: '10.0.0.5' } }
+  const v = judge(r, { trustedHosts: ['example.com'] })
+  assert.equal(v.ok, false)
+  assert.equal(v.reason, 'external-without-auth')
+})

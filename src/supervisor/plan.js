@@ -33,9 +33,12 @@ export const DEFAULTS = Object.freeze({
  * @param {{committedAS:number, commitLimit:number}} o.memory
  * @param {{consecutive:number, lastRestartAt:number, restartsToday:number}} o.state
  * @param {number} o.now
+ * @param {{consecutiveBreaches?:number, minIntervalMs?:number, maxRestartsPerDay?:number}} [o.config]
+ *   ⚠️ 修复（2026-11-04 测试）：用户 config.json 的 restart.* 之前从未传入，
+ *      导致"可调参数"实际无效（decide 永远用 DEFAULTS）。
  */
-export function decide({ memory = {}, state = {}, now = Date.now() } = {}) {
-  const cfg = DEFAULTS
+export function decide({ memory = {}, state = {}, now = Date.now(), config } = {}) {
+  const cfg = { ...DEFAULTS, ...(config ?? {}) }
   const as = Number(memory.committedAS)
   const limit = Number(memory.commitLimit)
 
@@ -78,7 +81,8 @@ export function decide({ memory = {}, state = {}, now = Date.now() } = {}) {
 function r(x) { return Number(x.toFixed(3)) }
 
 /** 重启请求文件内容（supervisor 脚本读它） */
-export function buildRestartRequest({ reason, at = Date.now(), requestedBy = 'cs-guard' }) {
+export function buildRestartRequest({ reason, at = Date.now(), requestedBy = 'cs-guard', config } = {}) {
+  const maxPerDay = Number.isInteger(config?.maxRestartsPerDay) ? config.maxRestartsPerDay : DEFAULTS.maxRestartsPerDay
   return {
     schema: 'cs-guard/restart-request/v1',
     at,
@@ -86,9 +90,9 @@ export function buildRestartRequest({ reason, at = Date.now(), requestedBy = 'cs
     requestedBy,
     // supervisor 必须校验这几项再执行
     guards: {
-      requireNoActiveTurns: true,
+      requireNoActiveTurns: config?.requireNoActiveTurns !== false,
       respectMinInterval: true,
-      maxPerDay: DEFAULTS.maxRestartsPerDay,
+      maxPerDay,
     },
   }
 }

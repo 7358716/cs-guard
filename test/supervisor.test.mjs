@@ -67,3 +67,39 @@ test('压缩简报含目标与待办', () => {
   assert.match(p, /待办：渠道层/)
   assert.match(p, /不要重复已完成/)
 })
+
+// ── 2026-11-04 测试回归 ──────────────────────────────────────────────────
+// 🔴 P0-3：buildReport 之前不传 targets，导致自定义 probeTargets 全部宕机时假绿。
+// 🔴 P1-3：restart.* 配置之前从未传入 decide()，用户配置无效。
+test('2026-11-04 P0-3：自定义 targets 全宕 → critical（而非 ok）', async () => {
+  const { buildReport } = await import('../src/index.js')
+  const custom = [{ id: 'my-custom', cls: 'domestic' }]
+  const allDown = [{ id: 'my-custom', ok: false }]
+  const report = buildReport({ network: allDown, targets: custom })
+  assert.equal(report.level, 'critical')
+  assert.ok(report.findings.some((f) => f.type === 'network'))
+})
+
+test('2026-11-04 P1-3：decide 接受用户 config（consecutiveBreaches 生效）', () => {
+  // 默认需要连续 3 次越线才重启
+  const r1 = decide({ memory: { committedAS: 99, commitLimit: 100 }, state: { consecutive: 1 }, now: NOW })
+  assert.equal(r1.decision, DECISION.WATCH)
+  // 用户 config 放宽到 1 次 → 立即重启
+  const r2 = decide({ memory: { committedAS: 99, commitLimit: 100 }, state: { consecutive: 1 }, now: NOW, config: { consecutiveBreaches: 1 } })
+  assert.equal(r2.decision, DECISION.RESTART)
+})
+
+test('2026-11-04 P1-3：decide 接受用户 maxRestartsPerDay 覆盖', () => {
+  const r = decide({
+    memory: { committedAS: 99, commitLimit: 100 },
+    state: { consecutive: 5, restartsToday: 3 },
+    now: NOW,
+    config: { maxRestartsPerDay: 5 },
+  })
+  assert.equal(r.decision, DECISION.RESTART, 'maxPerDay=5 时 restartsToday=3 不应 STOP')
+})
+
+test('2026-11-04 P1-3：buildRestartRequest 带用户 maxPerDay', () => {
+  const r = buildRestartRequest({ reason: 'x', config: { maxRestartsPerDay: 7 } })
+  assert.equal(r.guards.maxPerDay, 7)
+})

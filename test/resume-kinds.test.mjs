@@ -84,3 +84,27 @@ test('未知 kind ⇒ 交人（不猜“正常结束”）', () => {
 test('空/缺失 reason ⇒ 交人', () => {
   assert.equal(d({}).action, ACTION.ASK_HUMAN)
 })
+
+// ── 2026-11-04 测试回归 ──────────────────────────────────────────────────
+// 🔴 P1-2：compactPrompt 之前对非数组 done/pending/constraint 直接 .join 崩溃（HTTP 500）。
+test('2026-11-04 P1-2：compactPrompt 接受字符串（非数组）不崩溃', async () => {
+  const { compactPrompt } = await import('../src/repair/resume.js')
+  const s = compactPrompt({ goal: '测试', done: '已完成A', pending: '待办B', constraint: '约束C' })
+  assert.match(s, /已完成A/)
+  assert.match(s, /待办B/)
+  assert.match(s, /约束C/)
+})
+
+test('2026-11-04 P1-2：compactPrompt 接受混合数组与字符串', async () => {
+  const { compactPrompt } = await import('../src/repair/resume.js')
+  const s = compactPrompt({ done: ['a', 'b'], pending: '单条', constraint: ['c1', 'c2'] })
+  assert.match(s, /已完成：a；b/)
+  assert.match(s, /待办：单条/)
+  assert.match(s, /约束：c1；c2/)
+})
+
+test('2026-11-04 P1-2：compactPrompt 空对象不崩溃', async () => {
+  const { compactPrompt } = await import('../src/repair/resume.js')
+  const s = compactPrompt({})
+  assert.match(s, /简报/)
+})

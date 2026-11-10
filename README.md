@@ -68,11 +68,11 @@ dsh plugin --profile <name> add github:7358716/cs-guard
 ## 验证
 
 ```bash
-npm test            # 190 项单测/集成测试（含真实 HTTP API、认证围栏、逐面板渲染）
+npm test            # 213 项单测/集成测试（含真实 HTTP API、认证围栏、逐面板渲染、看门狗续跑）
 npm run test:static # 结构自检
 ```
 
-## v1.8.0 修复（故障注入实测驱动）
+## v1.9.0 新增（自动续跑 + 定时巡检）
 
 - **安全**：路由围栏改为委托宿主 `connection` 服务真实校验 —— 修复「伪造 `dsh-auth-*` cookie 即可读写配置」的认证绕过（生产公网入口实测 200 ⇒ 修复后 401/403）。
 - **检测**：`/diag` 补上磁盘与 profile 配置检查（原先配置页永远 ✅、环境页磁盘永远没数据）。

@@ -26,9 +26,10 @@ import { registerRoutes, PREFIX as API_PREFIX } from './web/routes.js'
 import { normalizeBootConfig, validateUserConfig, redactSecrets } from './config/validate.js'
 import { inspectProfile, detectProfileName, DEFAULT_PROFILE } from './detect/profile.js'
 import { readConfigState, withDefaults, DEFAULTS, resolveDshHome } from './config/store.js'
+import { installWatchdog } from './watchdog.js'
 
 const NAME = 'cs-guard'
-const VERSION = '1.8.0'
+const VERSION = '1.9.0'
 
 export const name = NAME
 export const version = VERSION
@@ -41,7 +42,9 @@ export function buildReport(input = {}) {
   const findings = []
 
   if (input.network) {
-    const n = classifyNetwork(input.network)
+    // ⚠️ 修复（2026-11-04 测试）：之前 buildReport 调用 classifyNetwork 时不传 targets，
+    //   导致自定义 probeTargets 全部宕机时 /diag 仍报"全部正常"（假绿）。
+    const n = classifyNetwork(input.network, input.targets ?? input.probeTargets)
     if (n.verdict !== 'healthy') {
       findings.push({ type: 'network', level: n.verdict === 'all-down' ? 'critical' : 'warn', detail: n.impact.join('；') || '网络异常' })
     }
@@ -133,6 +136,10 @@ export const apply = guardApply(function applyInner(ctx, rawConfig = {}) {
   })
   if (provided) log.info('巡检接口已暴露')
   else log.warn('宿主无 provide：巡检接口仅内部可用（功能不受影响）')
+
+  // ── 自动续跑看门狗（v1.9.0 新增；定时巡检不在本插件内排期）──
+  // ⚠️ 服务（agents/suggest）一律经 ctx.inject 取；logger 显式传（不读 ctx.warn）
+  installWatchdog(ctx, { warn: log.warn, info: log.info })
 
   // ── HTTP API（设置页数据源；全部过 guard）──
   const routesOk = safeInject(ctx, ['webServer'], (scoped) => {

@@ -119,11 +119,24 @@ export function judge(req, { trustedHosts = [], getConnection } = {}) {
     if (originHost !== hostHeader) return { ok: false, status: 403, reason: 'cross-origin' }
   }
 
-  const addr = req?.socket && req.socket.remoteAddress
-
   // ② 直连本地（不经代理）→ 放行（本机管理员；Host 必须是 localhost）
-  if (isLoopbackAddr(addr) && isLocalHostHeader(hostHeader)) {
+  // ⚠️ 修复（2026-11-04 测试）：代理请求的 remoteAddress 也是 127.0.0.1，
+  //   但 Host 头可伪造。只有"没有代理头 + loopback + 本地 Host"才视为直连。
+  const addr = req?.socket && req.socket.remoteAddress
+  const headers = req?.headers || {}
+  const isProxied = Boolean(
+    headers['x-forwarded-for'] || headers['x-forwarded-proto'] ||
+    headers['x-forwarded-host'] || headers['x-real-ip'],
+  )
+  if (!isProxied && isLoopbackAddr(addr) && isLocalHostHeader(hostHeader)) {
     return { ok: true }
+  }
+
+  // ②b 可信 Host 清单（修复：之前 trustedHosts 参数被接受但从未使用，是死代码）
+  if (isTrustedHostHeader(hostHeader, trustedHosts)) {
+    const conn = safeGetConnection(getConnection)
+    if (conn) return verifySession(req, conn)
+    return { ok: false, status: 403, reason: 'trusted-host-without-session' }
   }
 
   // ③ 其余：必须由宿主 connection 服务做真实校验（签名/cookie 有效性/可信 Host）

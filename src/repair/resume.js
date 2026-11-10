@@ -108,12 +108,16 @@ export function decideResume({ reason, attempt = 0, context = {}, maxAttempts = 
 
 /** 压缩提示词（注入给模型的「简报」） */
 export function compactPrompt(state = {}) {
-  const { goal, done = [], pending = [], constraint = [] } = state
+  const asList = (v) => Array.isArray(v) ? v.filter((x) => x !== undefined && x !== null && String(x) !== '') : (v === undefined || v === null || String(v) === '' ? [] : [String(v)])
+  const { goal, done, pending, constraint } = state
   const lines = ['【上下文已压缩，以下为当前进度简报】']
   if (goal) lines.push(`目标：${goal}`)
-  if (done.length) lines.push(`已完成：${done.join('；')}`)
-  if (pending.length) lines.push(`待办：${pending.join('；')}`)
-  if (constraint.length) lines.push(`约束：${constraint.join('；')}`)
+  const d = asList(done)
+  if (d.length) lines.push(`已完成：${d.join('；')}`)
+  const p = asList(pending)
+  if (p.length) lines.push(`待办：${p.join('；')}`)
+  const c = asList(constraint)
+  if (c.length) lines.push(`约束：${c.join('；')}`)
   lines.push('请从中断处继续，不要重复已完成的工作。')
   return lines.join('\n')
 }
