@@ -29,7 +29,7 @@ import { readConfigState, withDefaults, DEFAULTS, resolveDshHome } from './confi
 import { installWatchdog } from './watchdog.js'
 
 const NAME = 'cs-guard'
-const VERSION = '1.9.0'
+const VERSION = '1.9.1'
 
 export const name = NAME
 export const version = VERSION
